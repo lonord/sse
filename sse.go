@@ -41,9 +41,9 @@ func NewService() *Service {
 }
 
 // HandleClient is used to handle a client with streaming and returns a chan of closing
-func (s *Service) HandleClient(clientID interface{}, w http.ResponseWriter) (chan CloseType, error) {
-	s.lck.RLock()
-	defer s.lck.RUnlock()
+func (s *Service) HandleClient(clientID interface{}, w http.ResponseWriter) (<-chan CloseType, error) {
+	s.lck.Lock()
+	defer s.lck.Unlock()
 	_, has := s.clients[clientID]
 	if has {
 		return nil, fmt.Errorf("client with id %v is already exist", clientID)
@@ -52,7 +52,11 @@ func (s *Service) HandleClient(clientID interface{}, w http.ResponseWriter) (cha
 	if !ok {
 		return nil, fmt.Errorf("streaming unsupported")
 	}
-	notify := w.(http.CloseNotifier).CloseNotify()
+	cn, ok := w.(http.CloseNotifier)
+	if !ok {
+		return nil, fmt.Errorf("close notify unsupported")
+	}
+	notify := cn.CloseNotify()
 	outChan := make(chan CloseType)
 	closeChan := make(chan bool)
 	msgChan := make(chan Event)
@@ -90,22 +94,67 @@ func (s *Service) HandleClient(clientID interface{}, w http.ResponseWriter) (cha
 
 // CloseClient is used to disconnect client by server
 func (s *Service) CloseClient(clientID interface{}) error {
+	s.lck.RLock()
 	client, has := s.clients[clientID]
+	s.lck.RUnlock()
 	if !has {
 		return fmt.Errorf("client with id %v is not found", clientID)
 	}
-	client.closeChan <- true
+	close(client.closeChan)
 	return nil
+}
+
+// CloseAllClients is used to disconnect all clients
+func (s *Service) CloseAllClients() {
+	s.doEachClient(func(ci clientInstance) {
+		close(ci.closeChan)
+	})
 }
 
 // Send is used to send data to client
 func (s *Service) Send(clientID interface{}, e Event) error {
+	s.lck.RLock()
 	client, has := s.clients[clientID]
+	s.lck.RUnlock()
 	if !has {
 		return fmt.Errorf("client with id %v is not found", clientID)
 	}
 	client.msgChan <- e
 	return nil
+}
+
+// Broadcast is used to broadcast event to all connected clients
+func (s *Service) Broadcast(e Event) {
+	s.doEachClient(func(ci clientInstance) {
+		ci.msgChan <- e
+	})
+}
+
+// GetClientCount is used to get count of client
+func (s *Service) GetClientCount() int {
+	s.lck.RLock()
+	defer s.lck.RUnlock()
+	return len(s.clients)
+}
+
+func (s *Service) doEachClient(fn func(ci clientInstance)) {
+	s.lck.RLock()
+	cs := make([]clientInstance, len(s.clients))
+	i := 0
+	for _, c := range s.clients {
+		cs[i] = c
+		i = i + 1
+	}
+	s.lck.RUnlock()
+	var wg sync.WaitGroup
+	for _, c := range cs {
+		wg.Add(1)
+		go func(ci clientInstance) {
+			defer wg.Done()
+			fn(ci)
+		}(c)
+	}
+	wg.Wait()
 }
 
 type clientInstance struct {
