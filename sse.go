@@ -31,12 +31,21 @@ const (
 type Service struct {
 	clients map[interface{}]clientInstance
 	lck     sync.RWMutex
+	opts    Option
 }
 
 // NewService is used to create a sse.Service instance
 func NewService() *Service {
 	return &Service{
 		clients: make(map[interface{}]clientInstance),
+	}
+}
+
+// NewServiceWithOption is used to create a sse.Service instance with additional option
+func NewServiceWithOption(o Option) *Service {
+	return &Service{
+		clients: make(map[interface{}]clientInstance),
+		opts:    o,
 	}
 }
 
@@ -69,6 +78,9 @@ func (s *Service) HandleClient(clientID interface{}, w http.ResponseWriter) (<-c
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
+		for k, v := range s.opts.Headers {
+			w.Header().Set(k, v)
+		}
 		for {
 			select {
 			case <-notify:

@@ -49,6 +49,27 @@ func TestSingleClient(t *testing.T) {
 	assert.Equal(t, s.GetClientCount(), 0)
 }
 
+func TestSingleClientWithConfig(t *testing.T) {
+	s := NewServiceWithOption(Option{
+		Headers: map[string]string{"X-Accel-Buffering": "no"},
+	})
+	r := NewRecorder()
+	clientID := "client1"
+	closeChan, err := s.HandleClient(clientID, r)
+	assert.NoError(t, err)
+	s.Send(clientID, Event{
+		Data: "123",
+	})
+	<-r.flushChan
+	assert.Equal(t, "no", r.HeaderMap.Get("X-Accel-Buffering"))
+	assert.Equal(t, r.Body.String(), "data:123\n\n")
+	go func() {
+		s.CloseClient(clientID)
+	}()
+	<-closeChan
+	assert.Equal(t, s.GetClientCount(), 0)
+}
+
 func TestSingleClientWithClose(t *testing.T) {
 	s := NewService()
 	r := NewRecorder()
