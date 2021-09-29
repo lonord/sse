@@ -78,6 +78,7 @@ func (s *Service) HandleClient(clientID interface{}, w http.ResponseWriter) (<-c
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
 		for k, v := range s.opts.Headers {
 			w.Header().Set(k, v)
 		}
